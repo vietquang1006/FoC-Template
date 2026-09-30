@@ -1,0 +1,6 @@
+# The build context is the whole repository. Send only what the image uses.
+**
+!supplier-service/package.json
+!supplier-service/package-lock.json
+!supplier-service/src
+!data/csv

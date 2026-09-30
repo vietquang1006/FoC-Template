@@ -1,0 +1,58 @@
+services:
+  supplier-db:
+    image: postgres:17-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${SUPPLIER_DB_USER:?copy .env.example to .env}
+      POSTGRES_PASSWORD: ${SUPPLIER_DB_PASSWORD:?copy .env.example to .env}
+      POSTGRES_DB: ${SUPPLIER_DB_NAME:?copy .env.example to .env}
+    # Published to this machine only. The password is a placeholder for local use.
+    ports:
+      - '127.0.0.1:${SUPPLIER_DB_PORT:-5433}:5432'
+    volumes:
+      - supplier-db-data:/var/lib/postgresql/data
+      - ./supplier-service/db/create-test-database.sql:/docker-entrypoint-initdb.d/create-test-database.sql:ro
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}']
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  supplier-service:
+    build:
+      context: .
+      dockerfile: supplier-service/Dockerfile
+    restart: unless-stopped
+    depends_on:
+      supplier-db:
+        condition: service_healthy
+      user-service-standin:
+        condition: service_started
+    environment:
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+      SUPPLIER_SERVICE_PORT: ${SUPPLIER_SERVICE_PORT:-3002}
+      SUPPLIER_DATABASE_URL: postgres://${SUPPLIER_DB_USER}:${SUPPLIER_DB_PASSWORD}@supplier-db:5432/${SUPPLIER_DB_NAME}
+      USER_SERVICE_URL: http://user-service-standin:3001
+      SUPPLIER_TIMEZONE: ${SUPPLIER_TIMEZONE:-Asia/Singapore}
+      SUPPLIER_SEED_ON_STARTUP: ${SUPPLIER_SEED_ON_STARTUP:-true}
+      SUPPLIER_AUTH_CACHE_SECONDS: ${SUPPLIER_AUTH_CACHE_SECONDS:-5}
+      SUPPLIER_READ_CACHE_SECONDS: ${SUPPLIER_READ_CACHE_SECONDS:-2}
+    ports:
+      - '127.0.0.1:${SUPPLIER_SERVICE_PORT:-3002}:${SUPPLIER_SERVICE_PORT:-3002}'
+
+  # Stands in for the User Service until it exists. Delete this service and
+  # point USER_SERVICE_URL above at the real one when it is added. It accepts
+  # fixed tokens such as admin-token, so it must never be reachable from outside.
+  user-service-standin:
+    image: node:24-alpine
+    restart: unless-stopped
+    command: ['node', '/standin/fake-user-service.ts']
+    environment:
+      USER_SERVICE_URL: http://localhost:3001
+    volumes:
+      - ./supplier-service/dev:/standin:ro
+    ports:
+      - '127.0.0.1:3001:3001'
+
+volumes:
+  supplier-db-data:
